@@ -25,9 +25,17 @@ def main():
     data=(json.dumps(row,ensure_ascii=True)+'\n').encode()
     fd=os.open(root/(sid+'.jsonl'),os.O_WRONLY|os.O_CREAT|os.O_APPEND,0o600)
     try:
-        import fcntl
-        fcntl.flock(fd,fcntl.LOCK_EX)
-        os.write(fd,data)
+        if os.name=='nt':
+            # Windows appends are not atomic across processes, so lock byte 0 as a mutex.
+            import msvcrt
+            msvcrt.locking(fd,msvcrt.LK_LOCK,1)
+            os.write(fd,data)
+            os.lseek(fd,0,os.SEEK_SET)
+            msvcrt.locking(fd,msvcrt.LK_UNLCK,1)
+        else:
+            import fcntl
+            fcntl.flock(fd,fcntl.LOCK_EX)
+            os.write(fd,data)
     finally:
         os.close(fd)
 

@@ -60,21 +60,44 @@ class Demo:
             self.state.hook(self.events[self.step])
 
 
+WINDOWS_KEYS={'H':'\x1b[A','P':'\x1b[B','M':'\x1b[C','K':'\x1b[D','\x0f':'\x1b[Z'}
+
+
 class Terminal:
     def __enter__(self):
-        import termios, tty
         self.buffer=''
-        self.saved=termios.tcgetattr(sys.stdin.fileno())
-        tty.setcbreak(sys.stdin.fileno())
+        if os.name=='nt':
+            # Windows consoles need VT processing switched on to honour ANSI escapes.
+            import ctypes
+            self.kernel=ctypes.windll.kernel32; self.handle=self.kernel.GetStdHandle(-11)
+            mode=ctypes.c_uint32(); self.kernel.GetConsoleMode(self.handle,ctypes.byref(mode))
+            self.saved=mode.value
+            self.kernel.SetConsoleMode(self.handle,self.saved|0x0004)
+        else:
+            import termios, tty
+            self.saved=termios.tcgetattr(sys.stdin.fileno())
+            tty.setcbreak(sys.stdin.fileno())
         sys.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J'); sys.stdout.flush()
         return self
 
     def __exit__(self,*args):
-        import termios
-        termios.tcsetattr(sys.stdin.fileno(),termios.TCSADRAIN,self.saved)
         sys.stdout.write('\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l'); sys.stdout.flush()
+        if os.name=='nt':
+            self.kernel.SetConsoleMode(self.handle,self.saved)
+        else:
+            import termios
+            termios.tcsetattr(sys.stdin.fileno(),termios.TCSADRAIN,self.saved)
 
     def key(self):
+        if os.name=='nt':
+            import msvcrt
+            if not msvcrt.kbhit():
+                return ''
+            key=msvcrt.getwch()
+            # Arrows and Shift+Tab arrive as a prefix byte plus a scan code.
+            if key in ('\x00','\xe0'):
+                return WINDOWS_KEYS.get(msvcrt.getwch(),'')
+            return key
         if select.select([sys.stdin],[],[],0)[0]:
             self.buffer+=os.read(sys.stdin.fileno(),64).decode('utf-8',errors='ignore')
         if not self.buffer:
